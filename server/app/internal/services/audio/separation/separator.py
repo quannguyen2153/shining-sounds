@@ -11,22 +11,22 @@ import torch
 
 from demucs.apply import apply_model, BagOfModels, TensorChunk, Model, tensor_chunk
 from demucs.htdemucs import HTDemucs
-from demucs.pretrained import get_model, ModelLoadingError, DEFAULT_MODEL
+from demucs.pretrained import get_model, ModelLoadingError
 from demucs.utils import DummyPoolExecutor, center_trim
 
 from .utils import load_wav, convert_audio_wav_to_bytes
 
 logger = logging.getLogger('uvicorn.error')
 
-class Separator:
-    class SeparationStreamProgress(Enum):
-        LOADING_WAVEFORM = b"LOADING_WAVEFORM"
-        APPLYING_MODEL = b"APPLYING_MODEL"
-        PROGRESS = b"PROGRESS"
-        CONVERTING_SOURCES = b"CONVERTING_SOURCES"
-        END = b"END"
+class SeparationStreamProgress(Enum):
+    LOADING_WAVEFORM = b"LOADING_WAVEFORM"
+    APPLYING_MODEL = b"APPLYING_MODEL"
+    PROGRESS = b"PROGRESS"
+    CONVERTING_SOURCES = b"CONVERTING_SOURCES"
+    END = b"END"
 
-    def __init__(self, model_name=DEFAULT_MODEL, model_repo=None, device="cuda" if torch.cuda.is_available() else "cpu"):
+class Separator:
+    def __init__(self, model_name: str, model_repo=None, device="cuda" if torch.cuda.is_available() else "cpu"):
         """
         Initialize the Separator with a specific model.
 
@@ -36,7 +36,6 @@ class Separator:
             device (str, optional): Device to run the model on ("cuda" or "cpu").
         """
         self.device = device
-        logger.info(f"Using device: {self.device}")
 
         try:
             self.model = get_model(name=model_name, repo=model_repo)
@@ -48,6 +47,8 @@ class Separator:
 
         self.model.to(device)
         self.model.eval()
+
+        logger.info(f"Initialized audio separator using device: {self.device}")
 
     def separate(
         self,
@@ -159,14 +160,14 @@ class Separator:
         mp3_bitrate=320,
         mp3_preset=2,
     ):
-        yield self.SeparationStreamProgress.LOADING_WAVEFORM.name
+        yield SeparationStreamProgress.LOADING_WAVEFORM.name
         wav = load_wav(audio_bytes, input_format, self.model.audio_channels, self.model.samplerate, seek_time, duration)
 
         ref = wav.mean(0)
         wav -= ref.mean()
         wav /= ref.std()
 
-        yield self.SeparationStreamProgress.APPLYING_MODEL.name
+        yield SeparationStreamProgress.APPLYING_MODEL.name
         apply_gen = self.apply_model_streaming(
             self.model, wav[None], device=self.device, shifts=shifts,
             split=split, overlap=overlap, num_workers=jobs, segment=segment
@@ -193,19 +194,19 @@ class Separator:
             'bits_per_sample': 24 if wav_output_type == "int24" else 16,
         }
 
-        yield self.SeparationStreamProgress.CONVERTING_SOURCES.name
+        yield SeparationStreamProgress.CONVERTING_SOURCES.name
         result = {}
         if stem is None:
             for source, name, i in zip(sources, self.model.sources, range(len(sources))):
                 result[name] = convert_audio_wav_to_bytes(source, output_format, **kwargs)
-                yield self.SeparationStreamProgress.PROGRESS.value + pickle.dumps({
+                yield SeparationStreamProgress.PROGRESS.value + pickle.dumps({
                     "processed": i + 1,
                     "total": len(sources),
                 })
         else:
             sources = list(sources)
             result[stem] = convert_audio_wav_to_bytes(sources.pop(self.model.sources.index(stem)), output_format, **kwargs)
-            yield self.SeparationStreamProgress.PROGRESS.value + pickle.dumps({
+            yield SeparationStreamProgress.PROGRESS.value + pickle.dumps({
                 "processed": 1,
                 "total": 2,
             })
@@ -213,12 +214,12 @@ class Separator:
             for i in sources:
                 other_stem += i
             result["no_"+stem] = convert_audio_wav_to_bytes(other_stem, output_format, **kwargs)
-            yield self.SeparationStreamProgress.PROGRESS.value + pickle.dumps({
+            yield SeparationStreamProgress.PROGRESS.value + pickle.dumps({
                 "processed": 2,
                 "total": 2,
             })
 
-        yield self.SeparationStreamProgress.END.value + pickle.dumps(result)
+        yield SeparationStreamProgress.END.value + pickle.dumps(result)
 
     def apply_model_streaming(
         self,
@@ -300,7 +301,7 @@ class Separator:
                     else:
                         yield value
                 out += shifted_out[..., max_shift - offset:]
-                yield self.SeparationStreamProgress.PROGRESS.value + pickle.dumps({
+                yield SeparationStreamProgress.PROGRESS.value + pickle.dumps({
                     "processed": i + 1,
                     "total": shifts,
                 })
@@ -343,7 +344,7 @@ class Separator:
                 eta = (elapsed / done) * (total_segments - done)
                 eta_str = time.strftime("%H:%M:%S", time.gmtime(eta))
 
-                yield self.SeparationStreamProgress.PROGRESS.value + pickle.dumps({
+                yield SeparationStreamProgress.PROGRESS.value + pickle.dumps({
                     "processed": done,
                     "total": total_segments,
                     "eta": eta_str

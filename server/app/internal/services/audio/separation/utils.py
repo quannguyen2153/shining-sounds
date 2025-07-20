@@ -184,6 +184,7 @@ def convert_audio_wav_to_bytes(
         if as_float:
             encoding = 'PCM_F'
             bits_per_sample = 32
+        # TODO: Torchaudio backend errors
         ta.save(buf, wav, sample_rate=samplerate, format=format.upper(),
                 encoding=encoding, bits_per_sample=bits_per_sample)
         return buf.getvalue()

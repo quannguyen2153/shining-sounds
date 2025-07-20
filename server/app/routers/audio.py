@@ -11,19 +11,23 @@ from enum import Enum
 from fastapi import APIRouter, UploadFile, HTTPException, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import whisper
 
-from app.internal.services.audio import AudioSeparator
+from app.internal.services.audio import AudioSeparator, SeparationStreamProgress, AudioTranscriptor, TranscriptionStreamProgress
 from app.config import settings
-from app.internal.services.audio.transcription.transcription import transcribe
 
-class AudioEventType(Enum):
+class SeparationEventType(Enum):
     DONE = "done"
     STEM = "stem"
     PROGRESS = "progress"
     STATUS = "status"
     MESSAGE = "message"
     UNKNOWN = "unknown"
+
+class TranscriptionEventType(str, Enum):
+    STATUS = "status"
+    LANGUAGE = "language"
+    SEGMENT = "segment"
+    DONE = "done"
 
 class StemMetadata(BaseModel):
     id: str
@@ -55,8 +59,8 @@ router = APIRouter(
     tags=["audio"],
 )
 
-separator = AudioSeparator()
-transcriptor = whisper.load_model(settings.transcription_model)
+separator = AudioSeparator(settings.separation_model)
+transcriptor = AudioTranscriptor(settings.transcription_model) # TODO: Transcriptor occupies all GPU memory
 
 in_memory_stems: dict = {}  # id -> (filename, BytesIO, mime_type, timestamp)
 
@@ -197,8 +201,8 @@ async def separate_audio_sources_stream(
         ):
             if isinstance(chunk, bytes):
                 # Final result payload
-                if chunk.startswith(separator.SeparationStreamProgress.END.value):
-                    stems = pickle.loads(chunk[len(separator.SeparationStreamProgress.END.value):])
+                if chunk.startswith(SeparationStreamProgress.END.value):
+                    stems = pickle.loads(chunk[len(SeparationStreamProgress.END.value):])
                     for name, audio_bytes in stems.items():
                         uid = str(uuid.uuid4())
                         now = time.time()
@@ -215,19 +219,19 @@ async def separate_audio_sources_stream(
                             "name": f"{name}.{output_format}",
                             "size": len(audio_bytes)
                         }
-                        yield f"event: {AudioEventType.STEM.value}\ndata: {json.dumps(meta)}\n\n"
+                        yield f"event: {SeparationEventType.STEM.value}\ndata: {json.dumps(meta)}\n\n"
 
-                    yield f"event: {AudioEventType.DONE.value}\ndata: null\n\n"
+                    yield f"event: {SeparationEventType.DONE.value}\ndata: null\n\n"
                 # Segment progress update
-                elif chunk.startswith(separator.SeparationStreamProgress.PROGRESS.value):
-                    payload = pickle.loads(chunk[len(separator.SeparationStreamProgress.PROGRESS.value):])
-                    yield f"event: {AudioEventType.PROGRESS.value}\ndata: {json.dumps(payload)}\n\n"
+                elif chunk.startswith(SeparationStreamProgress.PROGRESS.value):
+                    payload = pickle.loads(chunk[len(SeparationStreamProgress.PROGRESS.value):])
+                    yield f"event: {SeparationEventType.PROGRESS.value}\ndata: {json.dumps(payload)}\n\n"
                 else:
                     # Unknown binary chunk
-                    yield f"event: {AudioEventType.MESSAGE.value}\ndata: {chunk.decode(errors='ignore')}\n\n"
+                    yield f"event: {SeparationEventType.MESSAGE.value}\ndata: {chunk.decode(errors='ignore')}\n\n"
             else:
                 # Plain string progress (e.g., LOADING_WAVEFORM, APPLYING_MODEL, etc.)
-                yield f"event: {AudioEventType.STATUS.value}\ndata: {chunk.strip()}\n\n"
+                yield f"event: {SeparationEventType.STATUS.value}\ndata: {chunk.strip()}\n\n"
 
     headers = {
         "Content-Type": "text/event-stream",
@@ -278,7 +282,7 @@ async def transcribe_audio(
     file_bytes = await file.read()
     extension = file.filename.split('.')[-1].lower()
 
-    transcription = transcribe(
+    transcription = transcriptor.transcribe(
         model=transcriptor,
         audio_bytes=file_bytes,
         format=extension,
@@ -292,3 +296,80 @@ async def transcribe_audio(
         segments=transcription["segments"],
         language=transcription["language"]
     )
+
+@router.post("/transcribe/stream")
+async def transcribe_audio_stream(
+    file: UploadFile = File(...),
+    language: str = Form(None),
+):
+    """
+    Stream transcription results using Server-Sent Events (SSE).
+
+    Supported SSE event types:
+
+    - **status**:
+        Plain string for current stage (e.g. "LOADING_WAVEFORM", "LANGUAGE", "TRANSCRIBING_WAVEFORM")
+        ```
+        data: "TRANSCRIBING_WAVEFORM"
+        ```
+
+    - **segment**:
+        JSON object with real-time transcribed segment info.
+        ```
+        {
+            "start": 1.2,
+            "end": 4.3,
+            "text": "hello world",
+            "words": [ ... ]  // optional word timestamps
+        }
+        ```
+
+    - **done**:
+        Final event with full transcript, all segments, and language.
+        ```
+        {
+            "text": "complete transcript...",
+            "segments": [...],
+            "language": "en"
+        }
+        ```
+
+    Returns:
+        StreamingResponse: SSE-compatible event stream.
+    """
+
+    file_bytes = await file.read()
+    extension = file.filename.split('.')[-1].lower()
+
+    def event_stream():
+        for chunk in transcriptor.transcribe_streaming(
+            model=transcriptor,
+            audio_bytes=file_bytes,
+            format=extension,
+            task="transcribe",
+            language=language,
+            word_timestamps=True,
+        ):
+            if isinstance(chunk, str):
+                yield f"event: {TranscriptionEventType.STATUS.value}\ndata: {chunk.strip()}\n\n"
+            elif isinstance(chunk, bytes):
+                if chunk.startswith(TranscriptionStreamProgress.SEGMENT.value):
+                    payload = pickle.loads(chunk[len(TranscriptionStreamProgress.SEGMENT.value):])
+                    yield f"event: {TranscriptionEventType.SEGMENT.value}\ndata: {json.dumps(payload)}\n\n"
+                elif chunk.startswith(TranscriptionStreamProgress.LANGUAGE.value):
+                    payload = pickle.loads(chunk[len(TranscriptionStreamProgress.LANGUAGE.value):])
+                    yield f"event: {TranscriptionEventType.LANGUAGE.value}\ndata: {json.dumps(payload)}\n\n"
+                elif chunk.startswith(TranscriptionStreamProgress.END.value):
+                    payload = pickle.loads(chunk[len(TranscriptionStreamProgress.END.value):])
+                    yield f"event: {TranscriptionEventType.DONE.value}\ndata: {json.dumps(payload)}\n\n"
+            else:
+                # fallback case (optional)
+                yield f"event: {TranscriptionEventType.STATUS.value}\ndata: {str(chunk).strip()}\n\n"
+
+    headers = {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+
+    return StreamingResponse(event_stream(), headers=headers)

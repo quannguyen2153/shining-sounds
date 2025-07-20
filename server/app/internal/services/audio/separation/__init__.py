@@ -1,1 +1,1 @@
-from .separator import Separator as AudioSeparator
+from .separator import Separator as AudioSeparator, SeparationStreamProgress

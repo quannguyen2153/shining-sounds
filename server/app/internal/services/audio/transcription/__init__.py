@@ -1,1 +1,1 @@
-from .transcription import transcribe
+from .transcriptor import Transcriptor as AudioTranscriptor, TranscriptionStreamProgress
