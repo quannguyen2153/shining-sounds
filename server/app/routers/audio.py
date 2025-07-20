@@ -9,10 +9,13 @@ import json
 from enum import Enum
 
 from fastapi import APIRouter, UploadFile, HTTPException, File, Form
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import whisper
 
 from app.internal.services.audio import AudioSeparator
+from app.config import settings
+from app.internal.services.audio.transcription.transcription import transcribe
 
 class AudioEventType(Enum):
     DONE = "done"
@@ -30,6 +33,21 @@ class StemMetadata(BaseModel):
 class SeparateAudioSourcesResponse(BaseModel):
     stems: List[StemMetadata]
 
+class TranscriptionWordSegment(BaseModel):
+    start: float
+    end: float
+    word: str
+
+class TranscriptionTextSegment(BaseModel):
+    start: float
+    end: float
+    text: str
+    words: List[TranscriptionWordSegment]
+
+class TranscribeAudioResponse(BaseModel):
+    segments: List[TranscriptionTextSegment]
+    language: str
+
 logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(
@@ -38,6 +56,7 @@ router = APIRouter(
 )
 
 separator = AudioSeparator()
+transcriptor = whisper.load_model(settings.transcription_model)
 
 in_memory_stems: dict = {}  # id -> (filename, BytesIO, mime_type, timestamp)
 
@@ -50,7 +69,7 @@ async def stem_cleanup_coroutine(stem_ttl_seconds: int, cleanup_interval: int):
             logger.info(f"[CLEANUP] Stem expired: {filename} (ID: {sid})")
         await asyncio.sleep(cleanup_interval)
 
-@router.post("/separate")
+@router.post("/separate", response_model=SeparateAudioSourcesResponse)
 async def separate_audio_sources(
     file: UploadFile = File(...),
     stem: Literal["drum", "bass", "other", "vocals"] = Form(None),
@@ -250,3 +269,26 @@ async def get_stem(stem_id: str):
     return StreamingResponse(memory_file, media_type=mime_type, headers={
         "Content-Disposition": f'inline; filename="{filename}"'
     })
+
+@router.post("/transcribe", response_model=TranscribeAudioResponse)
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language: str = Form(None),
+):
+    file_bytes = await file.read()
+    extension = file.filename.split('.')[-1].lower()
+
+    transcription = transcribe(
+        model=transcriptor,
+        audio_bytes=file_bytes,
+        format=extension,
+        task="transcribe",
+        language=language,
+        word_timestamps=True,
+        verbose=True
+    )
+
+    return TranscribeAudioResponse(
+        segments=transcription["segments"],
+        language=transcription["language"]
+    )

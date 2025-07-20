@@ -1,9 +1,13 @@
 fastapi[all]
 
 # NOTE: Change to correct CUDA version (e.g. CUDA 12.4 is cu124)
---index-url https://download.pytorch.org/whl/cu124
+--extra-index-url https://download.pytorch.org/whl/cu124
 torch
 torchaudio
 
 demucs
 ffmpeg-python
+
+openai-whisper
+# NOTE: Specify Triton version based on OS (e.g. triton for Linux, triton-windows for Windows)
+triton-windows
