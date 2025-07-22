@@ -60,7 +60,6 @@ router = APIRouter(
 )
 
 separator = AudioSeparator(settings.separation_model)
-transcriptor = AudioTranscriptor(settings.transcription_model) # TODO: Transcriptor occupies all GPU memory
 
 in_memory_stems: dict = {}  # id -> (filename, BytesIO, mime_type, timestamp)
 
@@ -77,7 +76,7 @@ async def stem_cleanup_coroutine(stem_ttl_seconds: int, cleanup_interval: int):
 async def separate_audio_sources(
     file: UploadFile = File(...),
     stem: Literal["drum", "bass", "other", "vocals"] = Form(None),
-    output_format: Literal["wav", "mp3"] = Form("wav"),
+    output_format: Literal["wav", "flac", "mp3", "ogg"] = Form("flac"),
     start: str = Form(None),
     end: str = Form(None),
 ):
@@ -124,7 +123,7 @@ async def separate_audio_sources(
 async def separate_audio_sources_stream(
     file: UploadFile = File(...),
     stem: Literal["drum", "bass", "other", "vocals"] = Form(None),
-    output_format: Literal["wav", "mp3"] = Form("wav"),
+    output_format: Literal["wav", "flac", "mp3", "ogg"] = Form("flac"),
     start: str = Form(None),
     end: str = Form(None),
 ):
@@ -171,7 +170,7 @@ async def separate_audio_sources_stream(
     Parameters:
     - **file**: The uploaded audio file (formats like MP3, WAV, FLAC are supported).
     - **stem** (optional): Specific stem to extract (`"vocals"`, `"drum"`, `"bass"`, `"other"`). Defaults to all.
-    - **output_format**: Desired output format (`"wav"`, `"mp3"`). Default is `"wav"`.
+    - **output_format**: Desired output format. Default is `"flac"`.
     - **start** (optional): Start time in seconds for partial separation.
     - **end** (optional): End time in seconds for partial separation.
 
@@ -282,6 +281,9 @@ async def transcribe_audio(
     file_bytes = await file.read()
     extension = file.filename.split('.')[-1].lower()
 
+    # TODO: Transcriptor occupies all GPU memory, so load it only when needed. Should declare it as a global variable when have enough resources.
+    transcriptor = AudioTranscriptor(settings.transcription_model)
+
     transcription = transcriptor.transcribe(
         model=transcriptor,
         audio_bytes=file_bytes,
@@ -340,6 +342,9 @@ async def transcribe_audio_stream(
 
     file_bytes = await file.read()
     extension = file.filename.split('.')[-1].lower()
+
+    # TODO: Transcriptor occupies all GPU memory, so load it only when needed. Should declare it as a global variable when have enough resources.
+    transcriptor = AudioTranscriptor(settings.transcription_model)
 
     def event_stream():
         for chunk in transcriptor.transcribe_streaming(

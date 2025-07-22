@@ -10,6 +10,7 @@ import lameenc
 import numpy as np
 import torch
 import torchaudio as ta
+import soundfile as sf
 
 from demucs.audio import convert_audio, convert_audio_channels, prevent_clip, i16_pcm
 
@@ -151,43 +152,25 @@ def load_wav(audio_bytes, extension, audio_channels, samplerate, seek_time, dura
 
 def convert_audio_wav_to_bytes(
     wav: torch.Tensor,
-    format: tp.Literal["mp3", "wav"],
+    format: tp.Literal["wav", "flac", "mp3", "ogg"],
     samplerate: int,
-    bitrate: int = 320,
     clip: tp.Literal["rescale", "clamp", "tanh", "none"] = 'rescale',
-    bits_per_sample: tp.Literal[16, 24, 32] = 16,
-    as_float: bool = False,
-    preset: tp.Literal[2, 3, 4, 5, 6, 7] = 2,
 ) -> bytes:
-    """
-    Return audio file bytes instead of saving to disk.
-    """
     wav = prevent_clip(wav, mode=clip)
+    buf = BytesIO()
+    wav_np = wav.cpu().numpy().T
 
-    if format == "mp3":
-        C, T = wav.shape
-        wav = i16_pcm(wav)
-        encoder = lameenc.Encoder()
-        encoder.set_bit_rate(bitrate)
-        encoder.set_in_sample_rate(samplerate)
-        encoder.set_channels(C)
-        encoder.set_quality(preset)  # 2-highest, 7-fastest
-        wav = wav.data.cpu()
-        wav = wav.transpose(0, 1).numpy()
-        mp3_data = encoder.encode(wav.tobytes())
-        mp3_data += encoder.flush()
-        return mp3_data
-
-    elif format in {"wav"}:
-        buf = BytesIO()
-        encoding = 'PCM_S'
-        if as_float:
-            encoding = 'PCM_F'
-            bits_per_sample = 32
-        # TODO: Torchaudio backend errors
-        ta.save(buf, wav, sample_rate=samplerate, format=format.upper(),
-                encoding=encoding, bits_per_sample=bits_per_sample)
-        return buf.getvalue()
-
+    fmt = format.upper()
+    if fmt == "WAV":
+        subtype = 'PCM_16'
+    elif fmt == "FLAC":
+        subtype = 'PCM_16'
+    elif fmt == "MP3":
+        subtype = 'MPEG_LAYER_III'
+    elif fmt == "OGG":
+        subtype = 'VORBIS'
     else:
-        raise ValueError(f"Unsupported format: {format}")
+        subtype = None
+
+    sf.write(buf, wav_np, samplerate, format=fmt, subtype=subtype)
+    return buf.getvalue()

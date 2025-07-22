@@ -54,7 +54,7 @@ class Separator:
         self,
         audio_bytes: bytes,
         input_format: tp.Literal["mp3", "wav", "flac"],
-        output_format: tp.Literal["mp3", "wav"],
+        output_format: tp.Literal["wav", "flac", "mp3", "ogg"],
         seek_time: tp.Optional[float] = None,
         duration: tp.Optional[float] = None,
         shifts=1,
@@ -64,9 +64,6 @@ class Separator:
         jobs=0,
         stem=None,
         clip_mode: tp.Literal["rescale", "clamp", "tanh", "none"] = "rescale",
-        wav_output_type: tp.Literal["int16", "int24", "float32"] = "int16",
-        mp3_bitrate=320,
-        mp3_preset=2,
     ) -> dict[str, bytes]:
         """
         Perform source separation on raw audio content in bytes.
@@ -74,7 +71,7 @@ class Separator:
         Args:
             audio_bytes (bytes): Raw audio content in bytes.
             input_format (Literal["mp3", "wav", "flac"]): Format of the input audio.
-            output_format (Literal["mp3", "wav"], optional): Format of the output audio.
+            output_format (str): Format of the output audio.
             seek_time (float, optional): Start time in seconds to begin processing the audio.
             duration (float, optional): Duration in seconds to process from the seek time.
             shifts (int, optional): Number of shifted versions to use for test-time ensembling.
@@ -85,8 +82,6 @@ class Separator:
             stem (str, optional): Specific stem to isolate (e.g., "vocals"); returns that and the complementary mix.
             clip_mode (str, optional): Strategy for post-processing audio amplitude ("rescale", "clamp", "tanh", "none").
             wav_output_type (Literal["int16", "int24", "float32"], optional): Format of the output waveform data.
-            mp3_bitrate (int, optional): Bitrate in kbps for MP3 encoding.
-            mp3_preset (int, optional): Preset level for MP3 encoding (lower is slower but better quality).
 
         Returns:
             dict[str, bytes]: A dictionary mapping stem names (e.g., "vocals", "drums", "no_vocals") to byte-encoded audio files.
@@ -120,11 +115,7 @@ class Separator:
 
         kwargs = {
             'samplerate': self.model.samplerate,
-            'bitrate': mp3_bitrate,
-            'preset': mp3_preset,
             'clip': clip_mode,
-            'as_float': wav_output_type == "float32",
-            'bits_per_sample': 24 if wav_output_type == "int24" else 16,
         }
         result = {}
 
@@ -146,7 +137,7 @@ class Separator:
         self,
         audio_bytes: bytes,
         input_format: tp.Literal["mp3", "wav", "flac"],
-        output_format: tp.Literal["mp3", "wav"],
+        output_format: tp.Literal["wav", "flac", "mp3", "ogg"],
         seek_time: tp.Optional[float] = None,
         duration: tp.Optional[float] = None,
         shifts=1,
@@ -156,9 +147,6 @@ class Separator:
         jobs=0,
         stem=None,
         clip_mode: tp.Literal["rescale", "clamp", "tanh", "none"] = "rescale",
-        wav_output_type: tp.Literal["int16", "int24", "float32"] = "int16",
-        mp3_bitrate=320,
-        mp3_preset=2,
     ):
         yield SeparationStreamProgress.LOADING_WAVEFORM.name
         wav = load_wav(audio_bytes, input_format, self.model.audio_channels, self.model.samplerate, seek_time, duration)
@@ -187,11 +175,7 @@ class Separator:
 
         kwargs = {
             'samplerate': self.model.samplerate,
-            'bitrate': mp3_bitrate,
-            'preset': mp3_preset,
             'clip': clip_mode,
-            'as_float': wav_output_type == "float32",
-            'bits_per_sample': 24 if wav_output_type == "int24" else 16,
         }
 
         yield SeparationStreamProgress.CONVERTING_SOURCES.name
