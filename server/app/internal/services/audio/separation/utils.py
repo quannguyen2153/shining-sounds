@@ -2,17 +2,15 @@ import json
 import sys
 import subprocess
 import typing as tp
-from io import BytesIO
 import logging
+from io import BytesIO
 
 import ffmpeg
-import lameenc
 import numpy as np
 import torch
 import torchaudio as ta
 import soundfile as sf
-
-from demucs.audio import convert_audio, convert_audio_channels, prevent_clip, i16_pcm
+from demucs.audio import convert_audio, convert_audio_channels, prevent_clip
 
 logger = logging.getLogger('uvicorn.error')
 

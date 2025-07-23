@@ -1,18 +1,19 @@
 import asyncio
 import io
 import logging
-from typing import List, Literal
 import uuid
 import time
 import pickle
 import json
 from enum import Enum
+from urllib.parse import quote
+from typing import List, Literal
 
 from fastapi import APIRouter, UploadFile, HTTPException, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.internal.services.audio import AudioSeparator, SeparationStreamProgress, AudioTranscriptor, TranscriptionStreamProgress
+from app.internal.services.audio import AudioSeparator, SeparationStreamProgress, AudioTranscriber, TranscriptionStreamProgress
 from app.config import settings
 
 class SeparationEventType(Enum):
@@ -119,6 +120,7 @@ async def separate_audio_sources(
 
     return SeparateAudioSourcesResponse(stems=response_data)
 
+# TODO: Handle client disconnecting
 @router.post("/separate/stream")
 async def separate_audio_sources_stream(
     file: UploadFile = File(...),
@@ -270,7 +272,7 @@ async def get_stem(stem_id: str):
     logger.info(f"[CLEANUP] Stem served: {filename} (ID: {stem_id})")
 
     return StreamingResponse(memory_file, media_type=mime_type, headers={
-        "Content-Disposition": f'inline; filename="{filename}"'
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(filename)}"
     })
 
 @router.post("/transcribe", response_model=TranscribeAudioResponse)
@@ -281,8 +283,8 @@ async def transcribe_audio(
     file_bytes = await file.read()
     extension = file.filename.split('.')[-1].lower()
 
-    # TODO: Transcriptor occupies all GPU memory, so load it only when needed. Should declare it as a global variable when have enough resources.
-    transcriptor = AudioTranscriptor(settings.transcription_model)
+    # TODO: Transcriber occupies all GPU memory, so load it only when needed. Should declare it as a global variable when have enough resources.
+    transcriptor = AudioTranscriber(settings.transcription_model)
 
     transcription = transcriptor.transcribe(
         model=transcriptor,
@@ -299,6 +301,7 @@ async def transcribe_audio(
         language=transcription["language"]
     )
 
+# TODO: Handle client disconnecting
 @router.post("/transcribe/stream")
 async def transcribe_audio_stream(
     file: UploadFile = File(...),
@@ -343,8 +346,8 @@ async def transcribe_audio_stream(
     file_bytes = await file.read()
     extension = file.filename.split('.')[-1].lower()
 
-    # TODO: Transcriptor occupies all GPU memory, so load it only when needed. Should declare it as a global variable when have enough resources.
-    transcriptor = AudioTranscriptor(settings.transcription_model)
+    # TODO: Transcriber occupies all GPU memory, so load it only when needed. Should declare it as a global variable when have enough resources.
+    transcriptor = AudioTranscriber(settings.transcription_model)
 
     def event_stream():
         for chunk in transcriptor.transcribe_streaming(

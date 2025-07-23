@@ -1,2 +1,2 @@
 from .separation import AudioSeparator, SeparationStreamProgress
-from .transcription import AudioTranscriptor, TranscriptionStreamProgress
+from .transcription import AudioTranscriber, TranscriptionStreamProgress

@@ -31,7 +31,7 @@ class TranscriptionStreamProgress(Enum):
     SEGMENT = b"SEGMENT"
     END = b"END"
 
-class Transcriptor(Whisper):
+class Transcriber(Whisper):
     """
     A class that extends the Whisper model to provide transcription services.
     It includes methods for transcribing audio files and streaming transcriptions.
@@ -92,7 +92,7 @@ class Transcriptor(Whisper):
         self.transcribe = transcribe
         self.transcribe_streaming = transcribe_streaming
 
-        logger.info(f"Initialized audio transcriptor using device: {self.device}")
+        logger.info(f"Initialized audio transcriber using device: {self.device}")
 
 def transcribe(
     model: "Whisper",
